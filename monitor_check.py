@@ -4,6 +4,7 @@ import bugzilla
 import concurrent.futures
 import logging
 import re
+import signal
 import sys
 
 from click import secho
@@ -200,8 +201,16 @@ async def main():
             if 'Possible build states:' in line:
                 break
 
+        stop_future = asyncio.Future()
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, lambda: stop_future.set_exception(Exception('SIGTERM')))
+        asyncio.get_running_loop().add_signal_handler(signal.SIGINT, lambda: stop_future.set_exception(Exception('SIGINT')))
+
+        done, pending = await asyncio.wait(jobs + [stop_future], return_when=asyncio.FIRST_EXCEPTION)
+        if not stop_future.done():
+            stop_future.set_result(None)
+
         try:
-            await gather_or_cancel(*jobs)
+            await gather_or_cancel(stop_future, *jobs)
         except KojiError as e:
             sys.exit(str(e))
 
